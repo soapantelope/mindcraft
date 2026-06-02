@@ -1,6 +1,8 @@
-# Checkpoint 1: [See Google Docs Link](https://docs.google.com/document/d/1QKnx89y35HhnMf1gYEA3LE6GNnbJjlhUJF2-Rjw6fWA/edit?usp=sharing)
+# Checkpoint 2: [Click this Google Docs Link](https://docs.google.com/document/d/1FFu8siOhSZKjk2c7cd1_C3wuPN1SpfxMNNl0Gxcbs4g/edit?usp=sharing)
 
-# MindCraft: Text-Conditioned Infinite Worlds (CS348K Project Proposal)
+# Checkpoint 1: [Click this Google Docs Link](https://docs.google.com/document/d/1QKnx89y35HhnMf1gYEA3LE6GNnbJjlhUJF2-Rjw6fWA/edit?usp=sharing)
+
+# Project Proposal: MindCraft: Text-Conditioned Infinite Worlds
 
 **Sophia Zhang (sophiazh)**
 
