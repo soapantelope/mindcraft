@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "mindcraft.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CreateWorldScreenWorldTabMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

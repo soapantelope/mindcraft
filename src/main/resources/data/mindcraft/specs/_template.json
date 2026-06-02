@@ -1,0 +1,250 @@
+{
+  "__schema_version": 1,
+
+  "__how_to_use_this_template": [
+    "This template documents every WorldSpec field in the order the pipeline applies them.",
+    "Keys starting with '__' are documentation only and are silently dropped at parse time.",
+    "Fill in the 8 STEPS below in order. Each step lists what is known so far and what to decide.",
+    "Don't include fields you didn't set — every non-doc key here has a sensible default.",
+    "When in doubt, copy a bundled spec (e.g. rolling_plains_river.json) and tweak."
+  ],
+
+  "__pipeline_order": [
+    "1. Base noise field is sampled in [0,1].  -> set EITHER elevation_profile OR noise_layers.",
+    "2. elevation_range linearly remaps that field: e' = clamp01(e * (hi - lo) + lo).",
+    "3. The per-spec elevation CDF histogram-normalises e' back into a UNIFORM [0,1] distribution.",
+    "   After this step, the value q literally means 'q of the terrain area is at or below here'.",
+    "   This is why sea_level and biome_zones can be specified as TERRAIN FRACTIONS, not noise.",
+    "4. spatial_features are applied IN ARRAY ORDER on the post-CDF elevation field.",
+    "5. biome_zones are scanned ascending; the first band whose elev_max >= e wins.",
+    "6. Rivers are overlaid last: cells whose channel core fires become river_biome."
+  ],
+
+  "__y_coordinate_mapping": [
+    "After the CDF step, elev=sea_level is anchored to Minecraft Y=63 (the water plane).",
+    "metres_range = [metresLo, metresHi] sets the full vertical span across elev in [0,1].",
+    "Vertical scale is FIXED at 5 metres per block (does NOT change with horizontal world scale).",
+    "  blocks_above_sea = (elev - sea_level) * (metresHi - metresLo) / 5",
+    "Peaks above Y=250 are smoothly compressed so they never flatten on the build limit.",
+    "Ocean depth uses sqrt compression so deep ocean stays in-bounds.",
+    "Recommended ranges by world type:",
+    "  flat plains:        [-200, 100]   -> ~60 blocks of relief",
+    "  rolling hills:      [-300, 250]   -> ~110 blocks of relief",
+    "  forest / taiga:     [-250, 400]   -> ~130 blocks of relief",
+    "  alpine / mountains: [-300, 800]   -> ~220 blocks of relief (use scale >= 2)",
+    "  archipelago:        [-500, 150]   -> deep oceans, modest land",
+    "  mesa / canyons:     [-100, 500]   -> dramatic vertical buttes"
+  ],
+
+  "name": "Template World",
+  "__name_doc": "STEP 1 — A short, evocative name for the world. Required.",
+
+  "description": "One-line summary of the vibe (used only as metadata).",
+  "__description_doc": "STEP 1 — Optional one-line summary describing the feel of the world.",
+
+  "seed_offset": 0,
+  "__seed_offset_doc": "STEP 1 — Integer XOR'd into the world seed. Use a distinct number per spec if you ship many specs so they don't share rng artefacts when generated under the same world seed.",
+
+  "__STEP_2_choose_base_noise":
+    "Pick ONE of {elevation_profile, noise_layers}. Use elevation_profile for a single coherent terrain texture; use noise_layers when you want to blend two distinct styles (e.g. broad rolling base + sparse ridged mountains).",
+
+  "elevation_profile": {
+    "__doc": "STEP 2 (single-layer option). All seven modes are listed below; pick one and delete the others mentally — only the fields relevant to your chosen mode are read.",
+
+    "mode": "fbm",
+    "__mode_doc": {
+      "fbm":                 "rolling/organic — default; best for plains, taigas, forests, deserts",
+      "billow":              "puffy bumps (|fbm|-shaped) — soft hills, dunes, ice domes",
+      "ridged":              "sharp positive ridges — mountain crests, alpine spines",
+      "domain_warp":         "fbm with swirled coords — organic islands, marbled coasts, swamps",
+      "domain_warp_ridged":  "swirled ridges — twisted mountain chains, volcanic spines",
+      "cellular":            "voronoi cells — basalt columns, mosaic biomes, faceted archipelagos",
+      "stepped":             "fbm quantised into N plateaus + jitter — savanna terraces (or use mesa_step feature instead)"
+    },
+
+    "frequency": 4.0,
+    "__frequency_doc": "Noise cells per tile (1 tile = 1024 blocks horizontally at scale 1). 1.5–3 = continent-sized features; 3–6 = sub-continental variety (most worlds); 6–12 = busier; >15 starts to look noisy and repetitive.",
+
+    "octaves": 7,
+    "__octaves_doc": "Integer 1..10. Each extra octave adds finer detail at higher frequency. 4–7 is typical. 8+ is very rugged. (Only the first octave defines the broad shape.)",
+
+    "persistence": 0.5,
+    "__persistence_doc": "0..1. How much each finer octave contributes. 0.3 = soft and smooth; 0.5 = balanced; 0.7 = jagged and chaotic.",
+
+    "lacunarity": 2.0,
+    "__lacunarity_doc": "Frequency multiplier between octaves. 2.0 standard. <2 = octaves overlap (less detail spread); >2 = each octave is much finer than the last.",
+
+    "sharpness": 2.5,
+    "__sharpness_doc": "ridged / domain_warp_ridged only. 1 = rounded; 2–3 = sharp ridges; 4+ = knife-edge crests.",
+
+    "warp_strength": 0.45,
+    "__warp_strength_doc": "domain_warp / domain_warp_ridged only. 0 = identical to fbm; 0.4–0.6 = pleasant organic swirl; 1.0+ = trippy curls.",
+
+    "n_steps": 7,
+    "jitter": 0.022,
+    "__stepped_doc": "stepped mode only. n_steps = number of terrace levels (3–8 typical); jitter = small noise so terraces aren't perfectly flat (0.01–0.05).",
+
+    "cell_mode": "f2_minus_f1",
+    "cell_jitter": 1.0,
+    "__cellular_doc": "cellular mode only. cell_mode = {f1, f1_inv, f2_minus_f1}. f1 = distance to nearest seed (blobs); f1_inv = 1 - f1 (sharp peaked cells); f2_minus_f1 = veined cell boundaries (best for archipelago coastlines). cell_jitter 0..1 randomises seed positions inside cells (1.0 = full random)."
+  },
+
+  "noise_layers": [
+    {
+      "__doc": "STEP 2 (multi-layer option). DELETE elevation_profile if you use noise_layers. Each entry has all elevation_profile fields plus 'weight', 'blend', and optional 'mask'.",
+      "mode": "fbm",
+      "frequency": 2.5,
+      "octaves": 6,
+      "persistence": 0.5,
+      "lacunarity": 2.0,
+      "weight": 1.0,
+      "blend": "average"
+    },
+    {
+      "__example_doc": "Sparse ridged crests added on top of the rolling base, gated by a low-frequency mask so they only appear in some regions.",
+      "mode": "ridged",
+      "frequency": 4.0,
+      "octaves": 5,
+      "persistence": 0.5,
+      "lacunarity": 2.0,
+      "sharpness": 2.5,
+      "weight": 0.5,
+      "blend": "average",
+      "mask": {
+        "frequency": 1.5,
+        "octaves": 4,
+        "persistence": 0.5,
+        "threshold": 0.55,
+        "softness": 0.08,
+        "invert": false,
+        "__mask_doc": "A separate low-frequency fbm gate in [0,1]. Layer contributes fully where mask > threshold + softness, blends to 0 below threshold - softness. invert flips that."
+      }
+    }
+  ],
+  "__noise_layers_blend_doc": "'average' (default) = weighted mean across average-blend layers; 'add' = appended ON TOP after the average. Mix one base 'average' layer with one or two 'add' layers to layer features on top.",
+
+  "elevation_range": [0.0, 1.0],
+  "__elevation_range_doc": "STEP 3 — Linear remap of raw noise BEFORE CDF normalisation. Constraint: 0 <= lo < hi <= 1. Default [0, 1] is correct for almost every world. Tightening (e.g. [0.3, 0.8]) shrinks the input distribution so the CDF step does less stretching, which can make rivers/coastlines feel less varied. Leave at [0, 1] unless you have a specific reason.",
+
+  "sea_level": 0.30,
+  "__sea_level_doc": "STEP 4 — TERRAIN FRACTION in [0,1] AFTER CDF normalisation. sea_level=0.30 means roughly the lowest 30% of land becomes underwater. Guidance: mostly-land world 0.05–0.20; balanced 0.25–0.40; ocean world 0.55–0.80. Rivers carve their channels to (sea_level - 0.035) so they fill with water.",
+
+  "metres_range": [-300, 200],
+  "__metres_range_doc": "STEP 4 — Real-world metres across elev=0 (deepest ocean floor) to elev=1 (highest peak). Final Y is anchored at sea_level=63 and capped at Y=250 (smoothly compressed). See __y_coordinate_mapping above for recommendations by world type.",
+
+  "spatial_features": [
+    {
+      "__doc": "STEP 5 — Optional ordered pipeline of post-CDF transforms. Each entry mutates the [0,1] elevation field, then the next entry sees the mutated field.",
+
+      "type": "river",
+      "__type_doc_river": "Adds a stateless analytic river network: meandering channels that carve to (sea_level - 0.035) ONLY where terrain is in the lower half of its band. Rivers naturally avoid mountains.",
+      "river_freq": 0.55,
+      "river_warp": 0.5,
+      "river_octaves": 4,
+      "river_width": 0.0024,
+      "bank_width": 0.018,
+      "tributary_strength": 0.0,
+      "__river_param_doc": {
+        "river_freq":          "Tile-unit frequency of the meander network. 0.3 = sparse mighty rivers; 0.55 = a handful; 0.9 = dense network. (1 tile = 1024 blocks at scale 1.)",
+        "river_warp":          "0..1 meander wiggliness via domain warp. 0.5 typical.",
+        "river_octaves":       "Octaves of the warp field. 3–5 typical.",
+        "river_width":         "Channel half-width in TILE units (0.0024 ≈ 2–3 blocks at scale 1). Constant width regardless of terrain steepness.",
+        "bank_width":          "Ramp width from channel edge to bank top (tile units).",
+        "tributary_strength":  "0 = clean main channels only; 1 = full secondary network of smaller rivers. Mangrove deltas raise this."
+      }
+    },
+    {
+      "type": "sea_threshold",
+      "offset": -0.46,
+      "__type_doc_sea_threshold": "Adds a constant offset to elevation. NEGATIVE pushes terrain down (more ocean / sinks land). POSITIVE lifts. Use AFTER you've picked your base noise to nudge the overall land/sea ratio without redoing the CDF math.",
+      "__hint": "Note: the CDF was already built — sea_threshold operates POST-normalisation so it's just a vertical shift on the final field. Smaller numbers (|offset| <= 0.2) feel natural."
+    },
+    {
+      "type": "stretch",
+      "to": [0.0, 1.0],
+      "__type_doc_stretch": "Linear remap of the current [0,1] field to [to[0], to[1]]. Use to flatten the world (e.g. to=[0.3, 0.7] compresses everything toward the middle) or to push extremes (to=[0.0, 1.2] then clamps). Seamless across tiles."
+    },
+    {
+      "type": "coastal_smooth",
+      "sea_level": null,
+      "width": 0.08,
+      "strength": 0.6,
+      "__type_doc_coastal_smooth": "Pulls elevation NEAR sea_level toward sea_level itself — widens beaches, softens coasts, creates flat marshlands. width = neighbourhood around sea_level; strength = pull magnitude (0..1). Pass null for sea_level to use the top-level spec.sea_level."
+    },
+    {
+      "type": "mesa_step",
+      "n_steps": 6,
+      "jitter": 0.02,
+      "__type_doc_mesa_step": "Quantises elevation into n_steps terraces (with light jitter so each step isn't a perfect plane). Classic badlands look. Apply BEFORE river to let rivers carve through the steps; apply AFTER river to step the carved valleys."
+    },
+    {
+      "type": "dune_ridges",
+      "direction_deg": 270,
+      "spacing": 0.04,
+      "amplitude": 0.04,
+      "__type_doc_dune_ridges": "Parallel sinusoidal dunes, modulated by a slow mask so they appear in patches. direction_deg in degrees (0 = east, 90 = north); spacing = dune period in tile units; amplitude = elevation displacement."
+    }
+  ],
+
+  "__feature_order_recipes": {
+    "plains_with_meandering_rivers":  "[river]                                                       — gentle base + one meander network",
+    "alpine_with_valley_rivers":      "[river]                                                       — rivers form only in lowlands, mountains untouched",
+    "mesa_canyons":                   "[mesa_step]                                                   — terraced badlands",
+    "carved_mesa_with_river":         "[mesa_step, river]                                            — terraces first, river carves through them",
+    "tropical_archipelago":           "[coastal_smooth]                                              — softens island edges, broad beaches",
+    "mangrove_delta":                 "[river (high tributary_strength), coastal_smooth]             — dense branching channels + marsh coasts",
+    "drowned_continent":              "[sea_threshold(-0.4), coastal_smooth]                         — most land sinks, remaining coasts are gentle",
+    "desert_dunes":                   "[dune_ridges]                                                 — striped sand sea",
+    "stepped_island_chain":           "[stretch([0,1]), mesa_step, coastal_smooth]                   — discrete elevation tiers ringed by beaches",
+    "twisted_volcanic_islands":       "[coastal_smooth]   (pair with domain_warp_ridged base noise)  — cone peaks rising from warm sea"
+  },
+
+  "biome_zones": [
+    {"elev_max": 0.20, "biome": "ocean"},
+    {"elev_max": 0.30, "biome": "beach"},
+    {"elev_max": 0.60, "biome": "plains"},
+    {"elev_max": 0.85, "biome": "forest"},
+    {"elev_max": 1.00, "biome": "windswept_forest"}
+  ],
+  "__biome_zones_doc": [
+    "STEP 6 — List of (elev_max, biome) bands sorted ascending by elev_max. The first band whose elev_max >= cell's elev wins.",
+    "RULES:",
+    "  - The LAST entry MUST have elev_max: 1.0 (otherwise validation fails).",
+    "  - Bands must be sorted ascending and have unique elev_max.",
+    "  - Each biome name must appear in __valid_biomes below (BiomeRegistry).",
+    "TIP: choose your thresholds so sea_level is INSIDE one of them — ocean biomes below sea_level, beach biomes immediately above, then your land biomes.",
+    "TIP: for a 'mostly one biome' world, give that biome the widest band (e.g. plains 0.20–0.85)."
+  ],
+
+  "river_biome": "river",
+  "__river_biome_doc": "STEP 7 — Biome painted on cells where a river channel fired (only used when a 'river' spatial_feature is present). Common picks: 'river' for temperate worlds, 'frozen_river' for snow/tundra worlds.",
+
+  "__valid_biomes": [
+    "badlands", "bamboo_jungle", "beach", "birch_forest", "cherry_grove",
+    "cold_ocean", "dark_forest", "deep_cold_ocean", "deep_frozen_ocean",
+    "deep_lukewarm_ocean", "deep_ocean", "desert", "eroded_badlands",
+    "flower_forest", "forest", "frozen_ocean", "frozen_peaks", "frozen_river",
+    "grove", "ice_spikes", "jagged_peaks", "jungle", "lukewarm_ocean",
+    "mangrove_swamp", "meadow", "mushroom_fields", "ocean",
+    "old_growth_birch_forest", "old_growth_pine_taiga", "old_growth_spruce_taiga",
+    "pale_garden", "plains", "river", "savanna", "savanna_plateau",
+    "snowy_beach", "snowy_plains", "snowy_slopes", "snowy_taiga",
+    "sparse_jungle", "stony_peaks", "stony_shore", "sunflower_plains", "swamp",
+    "taiga", "warm_ocean", "windswept_forest", "windswept_gravelly_hills",
+    "windswept_hills", "windswept_savanna", "wooded_badlands"
+  ],
+
+  "__how_to_think_about_a_new_world": [
+    "1. Pick the dominant vibe and the climate (warm/cold, wet/dry).",
+    "2. Pick a base noise mode that matches the SHAPE you want:",
+    "   - rolling      -> fbm or billow",
+    "   - sharp peaks  -> ridged or domain_warp_ridged",
+    "   - organic isles-> domain_warp or cellular",
+    "   - terraces     -> stepped (or fbm + mesa_step feature)",
+    "3. Decide how much OCEAN (sea_level fraction) and how much VERTICAL RELIEF (metres_range).",
+    "4. Lay out biome_zones from low (ocean) to high (peaks) so the last band is at 1.0.",
+    "5. Add spatial_features for character (river for waterways, mesa_step for terraces, dunes, etc.).",
+    "6. Set river_biome to match climate (frozen_river for cold worlds).",
+    "7. Pick a seed_offset distinct from other shipped specs."
+  ]
+}

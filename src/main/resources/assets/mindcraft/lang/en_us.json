@@ -1,0 +1,6 @@
+{
+  "generator.mindcraft.world": "MindCraft",
+  "mindcraft.world_settings.title": "MindCraft Settings",
+  "mindcraft.world_settings.scale": "World Scale (1-6)",
+  "mindcraft.world_settings.prompt": "Terrain Prompt"
+}

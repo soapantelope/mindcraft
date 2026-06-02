@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "mindcraft",
+  "version": "${version}",
+  "name": "MindCraft",
+  "description": "Text-conditioned infinite Minecraft world generator",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/mindcraft/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "mindcraft.client.MindCraftDataGenerator"
+    ],
+    "client": [
+      "mindcraft.client.MindCraftClient"
+    ],
+    "main": [
+      "mindcraft.MindCraft"
+    ]
+  },
+  "mixins": [
+    "mindcraft.mixins.json",
+    {
+      "config": "mindcraft.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
