@@ -130,3 +130,10 @@ __pycache__/
 *.pyc
 *.pyo
 src/eval/
+.venv-eval/
+.venv/
+venv/
+
+# Node / Cloudflare Worker
+node_modules/
+.wrangler/

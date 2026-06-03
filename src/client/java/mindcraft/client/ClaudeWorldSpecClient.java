@@ -30,7 +30,12 @@ public final class ClaudeWorldSpecClient {
 
     public static final String CONFIG_FILE_NAME = "mindcraft-anthropic.properties";
     private static final String API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String DEFAULT_MODEL = "claude-opus-4-7";
+
+    // Shared hosted proxy that holds a rate-limited API key server-side, so people can try
+    // the mod without their own Anthropic key. 
+    private static final String DEFAULT_PROXY_URL = "https://mindcraft-proxy.soapantelope.workers.dev";
+
+    private static final String DEFAULT_MODEL = "claude-opus-4-8";
     private static final int MAX_TOKENS = 4096;
     private static final Gson GSON = new Gson();
     private static final HttpClient HTTP = HttpClient.newBuilder()
@@ -50,13 +55,30 @@ public final class ClaudeWorldSpecClient {
                         envKey2 != null && !envKey2.isBlank() ? "set" : "not set",
                         !config.apiKey.isBlank() ? "set (" + config.apiKey.length() + " chars)" : "not set");
                 String apiKey = firstNonBlank(envKey1, envKey2, config.apiKey);
-                if (apiKey == null) {
-                    throw new IllegalStateException("Missing Anthropic API key. Add it to "
-                            + config.path + " as api_key=sk-ant-..., or set ANTHROPIC_API_KEY.");
+                boolean proxyConfigured = config.proxyUrl != null
+                        && !config.proxyUrl.isBlank()
+                        && !config.proxyUrl.contains("YOUR-WORKER");
+
+                String targetUrl;
+                String keyForCall;
+                if (apiKey != null) {
+                    // User supplied their own key -> call Anthropic directly (bypasses the shared proxy).
+                    targetUrl = API_URL;
+                    keyForCall = apiKey;
+                    LOG.info("Using Anthropic API directly with a user-provided key.");
+                } else if (proxyConfigured) {
+                    // No personal key -> use the shared, rate-limited proxy (no key on the client).
+                    targetUrl = config.proxyUrl;
+                    keyForCall = null;
+                    LOG.info("No personal API key set; using shared MindCraft proxy at {}", targetUrl);
+                } else {
+                    throw new IllegalStateException("No Anthropic API key and no proxy configured. "
+                            + "Either set ANTHROPIC_API_KEY (or add api_key=sk-ant-... to " + config.path
+                            + "), or set proxy_url to a deployed MindCraft proxy.");
                 }
 
                 LOG.info("Calling Claude model={} for prompt: {}", config.model, userPrompt);
-                String responseText = callClaude(apiKey, config.model, userPrompt);
+                String responseText = callClaude(targetUrl, keyForCall, config.model, userPrompt);
                 String specJson = extractJsonObject(responseText);
                 WorldSpec spec = WorldSpec.fromJson(specJson);
                 List<String> errors = spec.validateForGeneration();
@@ -73,7 +95,12 @@ public final class ClaudeWorldSpecClient {
         });
     }
 
-    private static String callClaude(String apiKey, String model, String userPrompt)
+    /**
+     * Sends the Messages request to {@code url}. When {@code apiKey} is non-null the request goes
+     * directly to Anthropic with auth headers; when it is null the request goes to the shared proxy,
+     * which injects the key and version headers server-side.
+     */
+    private static String callClaude(String url, String apiKey, String model, String userPrompt)
             throws IOException, InterruptedException {
         JsonObject body = new JsonObject();
         body.addProperty("model", firstNonBlank(model, DEFAULT_MODEL));
@@ -88,19 +115,22 @@ public final class ClaudeWorldSpecClient {
         messages.add(message);
         body.add("messages", messages);
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(API_URL))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(90))
                 .header("content-type", "application/json")
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", "2023-06-01")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8));
+        if (apiKey != null) {
+            builder.header("x-api-key", apiKey)
+                    .header("anthropic-version", "2023-06-01");
+        }
+        HttpRequest request = builder.build();
 
         HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String err = "Anthropic API returned HTTP " + response.statusCode() + ": " + response.body();
-            LOG.error(err);
-            throw new IOException(err);
+            // Try to extract a human-friendly message from the JSON body (proxy or Anthropic errors).
+            String friendlyMessage = parseFriendlyError(response.body(), response.statusCode());
+            LOG.error("API error HTTP {}: {}", response.statusCode(), response.body());
+            throw new IOException(friendlyMessage);
         }
         JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
         JsonArray content = root.getAsJsonArray("content");
@@ -139,6 +169,26 @@ public final class ClaudeWorldSpecClient {
         }
     }
 
+    private static final String README_HINT =
+            "To use your own API key with no limits, see the mod README.";
+
+    private static String parseFriendlyError(String body, int status) {
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject err = root.has("error") ? root.getAsJsonObject("error") : null;
+            if (err != null && err.has("message")) {
+                String msg = err.get("message").getAsString();
+                String type = err.has("type") ? err.get("type").getAsString() : "";
+                // Proxy rate-limit errors — append the README hint.
+                if (type.startsWith("rate_limit") || status == 429 || status == 503) {
+                    return msg + "\n" + README_HINT;
+                }
+                return msg;
+            }
+        } catch (Exception ignored) {}
+        return "API error (HTTP " + status + "). " + README_HINT;
+    }
+
     private static String extractJsonObject(String raw) {
         String trimmed = raw.trim();
         int start = trimmed.indexOf('{');
@@ -155,10 +205,15 @@ public final class ClaudeWorldSpecClient {
             Files.createDirectories(path.getParent());
             Files.writeString(path,
                     "# MindCraft Anthropic API settings\n"
-                            + "# You can also set ANTHROPIC_API_KEY or MINDCRAFT_ANTHROPIC_API_KEY instead.\n"
+                            + "#\n"
+                            + "# Leave api_key BLANK to use the shared, rate-limited MindCraft proxy\n"
+                            + "# (no key needed). To use your own Anthropic key instead, paste it below\n"
+                            + "# or set ANTHROPIC_API_KEY / MINDCRAFT_ANTHROPIC_API_KEY in your environment.\n"
                             + "api_key=\n"
                             + "# Available: claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5-20251001\n"
-                            + "model=" + DEFAULT_MODEL + "\n",
+                            + "model=" + DEFAULT_MODEL + "\n"
+                            + "# Advanced: override the shared proxy URL. Leave blank to use the built-in default.\n"
+                            + "proxy_url=\n",
                     StandardCharsets.UTF_8);
         }
 
@@ -166,10 +221,15 @@ public final class ClaudeWorldSpecClient {
         try (InputStream in = Files.newInputStream(path)) {
             properties.load(in);
         }
+        String proxyUrl = properties.getProperty("proxy_url", "").trim();
+        if (proxyUrl.isBlank()) {
+            proxyUrl = DEFAULT_PROXY_URL;
+        }
         return new Config(
                 path,
                 properties.getProperty("api_key", "").trim(),
-                properties.getProperty("model", DEFAULT_MODEL).trim()
+                properties.getProperty("model", DEFAULT_MODEL).trim(),
+                proxyUrl
         );
     }
 
@@ -180,5 +240,5 @@ public final class ClaudeWorldSpecClient {
         return null;
     }
 
-    private record Config(Path path, String apiKey, String model) {}
+    private record Config(Path path, String apiKey, String model, String proxyUrl) {}
 }

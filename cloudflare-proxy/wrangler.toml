@@ -1,0 +1,17 @@
+name = "mindcraft-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+IP_PER_MIN = "5"
+IP_PER_DAY = "10"
+GLOBAL_PER_DAY = "500"
+MAX_TOKENS = "4096"
+MAX_BODY_BYTES = "60000"
+ALLOWED_MODELS = "claude-opus-4-8"
+
+[[kv_namespaces]]
+binding = "RL"
+id = "17de2870ee8e4f779677c9dc6a8a9bd3"
+
+

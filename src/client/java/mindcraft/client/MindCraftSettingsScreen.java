@@ -2,6 +2,7 @@ package mindcraft.client;
 
 import mindcraft.procgen.SpecRegistry;
 import mindcraft.world.WorldSelectionState;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.world.CreateWorldScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -38,8 +39,12 @@ public final class MindCraftSettingsScreen extends Screen {
     private final Screen parentScreen;
     private TextFieldWidget promptField;
     private ButtonWidget doneButton;
-    private TextWidget validationWidget;
     private boolean generating;
+
+    // Status message rendered in render() so it wraps and never overflows.
+    private Text statusText = Text.empty();
+    private int statusColor = 0xFFFFFF;
+    private int yStatus = 0;
 
     public MindCraftSettingsScreen(Screen parentScreen) {
         super(TITLE);
@@ -83,8 +88,7 @@ public final class MindCraftSettingsScreen extends Screen {
         this.addDrawableChild(ButtonWidget.builder(Text.translatable("gui.cancel"), b -> close())
                 .dimensions(centerX + 5, yButtons, BUTTON_WIDTH, BUTTON_HEIGHT).build());
 
-        validationWidget = new TextWidget(0, yButtons + 26, this.width, 9, Text.empty(), this.textRenderer);
-        this.addDrawableChild(validationWidget);
+        yStatus = yButtons + 26;
     }
 
     private void addCenteredText(Text text, int centerX, int y, int color) {
@@ -92,6 +96,18 @@ public final class MindCraftSettingsScreen extends Screen {
         MutableText colored = text.copy().styled(s -> s.withColor(color));
         TextWidget widget = new TextWidget(centerX - w / 2, y, w, 9, colored, this.textRenderer);
         this.addDrawableChild(widget);
+    }
+
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        super.render(context, mouseX, mouseY, delta);
+        if (!statusText.getString().isEmpty() && yStatus > 0) {
+            int x = this.width / 2 - FIELD_WIDTH / 2;
+            var lines = this.textRenderer.wrapLines(statusText, FIELD_WIDTH);
+            for (int i = 0; i < lines.size(); i++) {
+                context.drawTextWithShadow(this.textRenderer, lines.get(i), x, yStatus + i * 10, statusColor);
+            }
+        }
     }
 
     @Override
@@ -112,15 +128,18 @@ public final class MindCraftSettingsScreen extends Screen {
         }
 
         setGenerating(true);
-        validationWidget.setMessage(Text.literal("Updating world settings... please wait a couple seconds").formatted(Formatting.GRAY));
+        statusText = Text.literal("Generating world... please wait a couple seconds").formatted(Formatting.GRAY);
+        statusColor = 0xFFAAAAAA;
         ClaudeWorldSpecClient.generateSpecJson(prompt).whenComplete((specJson, throwable) -> {
             if (this.client == null) return;
             this.client.execute(() -> {
                 if (throwable != null) {
                     setGenerating(false);
-                    validationWidget.setMessage(Text.literal(rootMessage(throwable)).formatted(Formatting.RED));
+                    statusText = Text.literal(rootMessage(throwable)).formatted(Formatting.RED);
+                    statusColor = 0xFFFF5555;
                     return;
                 }
+                statusText = Text.empty();
                 applyDimensionType();
                 WorldSelectionState.setPending(prompt, "generated_prompt_world", specJson);
                 setGenerating(false);
