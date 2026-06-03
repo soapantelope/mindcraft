@@ -3,6 +3,7 @@
 What if you could get an infinite Minecraft world just from a prompt? Mindcraft is an experiment in fast, infinite world generation.
 
 Want to see how it works? Check out my article [here](https://medium.com/@sophia.p.zhang/mindcraft-text-conditioned-infinite-worlds-c5530e4a862b)!
+As of now, Mindcraft can only generate prompts that are feasible natural biomes in Minecraft 1.21.11.
 
 ## Examples
 
